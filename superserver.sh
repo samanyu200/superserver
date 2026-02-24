@@ -1,10 +1,11 @@
 #!/bin/bash
 
 BASE_DIR="/root/mcservers"
-USER_NAME="samanyu200"
-REPO_NAME="superserver"
-
 mkdir -p "$BASE_DIR"
+
+# -------- PAPER VERSION DATA --------
+PAPER_LATEST="1.21.11"
+PAPER_URL="https://fill-data.papermc.io/v1/objects/e708e8c132dc143ffd73528cccb9532e2eb17628b1a0eee74469bf466c7003f8/paper-1.21.11-116.jar"
 
 get_public_ip() {
     curl -s ifconfig.me || curl -s api.ipify.org || echo "0.0.0.0"
@@ -38,29 +39,29 @@ create_server() {
     mkdir -p "$BASE_DIR/$NAME"
     cd "$BASE_DIR/$NAME"
 
-    echo "Select type:"
-    echo "1) Paper (Java)"
-    echo "2) Bedrock"
-    read -p "Choice: " TYPE
-
     PORT=$(get_free_port)
 
-    if [ "$TYPE" = "2" ]; then
-        echo "Downloading Bedrock..."
-        wget -q https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.0.03.zip -O bedrock.zip
-        unzip -q bedrock.zip
-        rm bedrock.zip
-        echo "bedrock" > type.txt
-        echo "$PORT" > port.txt
-        echo "Created Bedrock server on port $PORT"
-    else
-        echo "Downloading Paper..."
-        wget -q https://api.papermc.io/v2/projects/paper/versions/1.20.4/builds/416/downloads/paper-1.20.4-416.jar -O server.jar
-        echo "eula=true" > eula.txt
-        echo "java" > type.txt
-        echo "$PORT" > port.txt
-        echo "Created Paper server on port $PORT"
+    echo "Downloading Paper $PAPER_LATEST..."
+    curl -L -o server.jar "$PAPER_URL"
+
+    if [ ! -f server.jar ]; then
+        echo "Download failed. Jar not found."
+        return
     fi
+
+    echo "eula=true" > eula.txt
+    echo "java" > type.txt
+    echo "$PORT" > port.txt
+
+    cat > server.properties <<EOF
+server-ip=0.0.0.0
+server-port=$PORT
+motd=SuperServer Node
+online-mode=true
+enable-command-block=true
+EOF
+
+    echo "Server created on port $PORT"
 }
 
 start_server() {
@@ -71,7 +72,7 @@ start_server() {
     fi
 
     if is_running "$NAME"; then
-        echo "Server already running!"
+        echo "Already running."
         return
     fi
 
@@ -79,49 +80,43 @@ start_server() {
 
     rm -f world/session.lock 2>/dev/null
 
-    TYPE=$(cat type.txt)
     PORT=$(cat port.txt)
     IP=$(get_public_ip)
 
-    echo "Starting server on $IP:$PORT"
+    echo "Starting server on 0.0.0.0:$PORT (Public: $IP:$PORT)"
 
-    if [ "$TYPE" = "bedrock" ]; then
-        screen -dmS "mc_$NAME" bash -c "./bedrock_server"
-    else
-        screen -dmS "mc_$NAME" bash -c '
-        while true; do
-            java -Xmx4G -Xms2G -jar server.jar --nogui
-            echo "Crash detected. Restarting in 10 seconds..."
-            sleep 10
-        done'
-    fi
+    screen -dmS "mc_$NAME" bash -c '
+    while true; do
+        java -Xmx4G -Xms2G -jar server.jar --nogui
+        echo "Crash detected. Restarting in 10s..."
+        sleep 10
+    done'
 }
 
 stop_server() {
     read -p "Server name: " NAME
     if ! is_running "$NAME"; then
-        echo "Server is not running."
+        echo "Server not running."
         return
     fi
 
     screen -S "mc_$NAME" -X stuff "stop$(printf \\r)"
     sleep 5
     screen -S "mc_$NAME" -X quit
-    echo "Server stopped safely."
+    echo "Stopped."
 }
 
 show_console() {
     read -p "Server name: " NAME
     if ! is_running "$NAME"; then
-        echo "Server is offline."
+        echo "Server offline."
         return
     fi
-    echo "Attaching to console (CTRL+A then D to detach)"
     screen -r "mc_$NAME"
 }
 
 list_servers() {
-    echo "==== Server List ===="
+    echo "==== SERVERS ===="
     for dir in "$BASE_DIR"/*; do
         [ -d "$dir" ] || continue
         NAME=$(basename "$dir")
@@ -131,40 +126,40 @@ list_servers() {
         else
             STATUS="OFFLINE"
         fi
-        echo "$NAME | Port: $PORT | Status: $STATUS"
+        echo "$NAME | Port: $PORT | $STATUS"
     done
 }
 
 delete_server() {
     read -p "Server name: " NAME
     if is_running "$NAME"; then
-        echo "Stop the server first!"
+        echo "Stop server first."
         return
     fi
     rm -rf "$BASE_DIR/$NAME"
-    echo "Server deleted."
+    echo "Deleted."
 }
 
 while true; do
     echo ""
-    echo "==== SUPER SERVER MENU ===="
-    echo "1) Create Server"
-    echo "2) Start Server (Background)"
-    echo "3) Stop Server"
-    echo "4) Show Console (Live)"
-    echo "5) List Servers (Status)"
-    echo "6) Delete Server"
+    echo "==== SUPER SERVER ===="
+    echo "1) Create"
+    echo "2) Start"
+    echo "3) Stop"
+    echo "4) Console"
+    echo "5) List"
+    echo "6) Delete"
     echo "7) Exit"
-    read -p "Select option: " CHOICE
+    read -p "Choice: " CH
 
-    case $CHOICE in
+    case $CH in
         1) create_server ;;
         2) start_server ;;
         3) stop_server ;;
         4) show_console ;;
         5) list_servers ;;
         6) delete_server ;;
-        7) exit 0 ;;
-        *) echo "Invalid option" ;;
+        7) exit ;;
+        *) echo "Invalid" ;;
     esac
 done
