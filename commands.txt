@@ -10,5 +10,5 @@ Then run this command
 java -Xmx8G -Xms4G -jar paper.jar --nogui
 Then accept the eula by changing the eula=false to eula=true in eula.txt file
 And run the above command again whenever you want to start your server.
-
+bash <(curl -s https://raw.githubusercontent.com/samanyu200/superserver/main/superserver.sh)
 
