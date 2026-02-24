@@ -2,6 +2,7 @@
 
 BASE="/mc-servers"
 PORT_DB="$BASE/ports.db"
+
 mkdir -p "$BASE"
 touch "$PORT_DB"
 
@@ -38,26 +39,35 @@ status_server() {
 
 create_server() {
     clear
-    echo "=== Create Server ==="
+    echo "====== CREATE SERVER ======"
     read -p "Server Name: " NAME
-    read -p "RAM (e.g 2G): " RAM
+    read -p "RAM (e.g 2G, 4G): " RAM
     read -p "CPU Limit % (e.g 50): " CPU
     read -p "Type (paper/vanilla/bedrock): " TYPE
     read -p "Version (e.g 1.20.4): " VERSION
 
     DIR="$BASE/$NAME"
+    if [ -d "$DIR" ]; then
+        echo "Server already exists!"
+        sleep 2
+        return
+    fi
+
     mkdir -p "$DIR"
     cd "$DIR" || exit
 
     PORT=$(get_port)
 
     if [ "$TYPE" = "paper" ]; then
+        echo "Downloading Paper..."
         wget -q -O server.jar "https://api.papermc.io/v2/projects/paper/versions/$VERSION/builds/493/downloads/paper-$VERSION-493.jar"
         echo "java" > type.txt
     elif [ "$TYPE" = "vanilla" ]; then
+        echo "Downloading Vanilla..."
         wget -q -O server.jar https://launcher.mojang.com/v1/objects/server.jar
         echo "java" > type.txt
     elif [ "$TYPE" = "bedrock" ]; then
+        echo "Downloading Bedrock..."
         wget -q https://minecraft.azureedge.net/bin-linux/bedrock-server-1.20.40.02.zip
         unzip -o bedrock-server-*.zip >/dev/null
         chmod +x bedrock_server
@@ -74,21 +84,24 @@ create_server() {
     echo "$PORT" > port.txt
 
     IP=$(get_ip)
+
     clear
     echo "=============================="
     echo "Server Created Successfully!"
+    echo "Name: $NAME"
     echo "Access IP: $IP:$PORT"
+    echo "Folder: $DIR"
     echo "=============================="
-    read -p "Press Enter..."
+    read -p "Press Enter to continue..."
 }
 
 start_server() {
     clear
-    echo "=== Start Server ==="
+    echo "====== START SERVER ======"
     ls "$BASE"
     read -p "Enter Server Name: " NAME
-    DIR="$BASE/$NAME"
 
+    DIR="$BASE/$NAME"
     if [ ! -d "$DIR" ]; then
         echo "Server not found!"
         sleep 2
@@ -109,7 +122,7 @@ start_server() {
     cd "$DIR" || exit
 
     if [ "$TYPE" = "java" ]; then
-        screen -dmS "$NAME" bash -c "while true; do java -Xms$RAM -Xmx$RAM -jar server.jar nogui; echo 'Crash detected, restarting in 5s...'; sleep 5; done"
+        screen -dmS "$NAME" bash -c "while true; do java -Xms$RAM -Xmx$RAM -jar server.jar --nogui; echo 'Crash detected, restarting in 5s...'; sleep 5; done"
     else
         screen -dmS "$NAME" bash -c "while true; do ./bedrock_server; echo 'Crash detected, restarting in 5s...'; sleep 5; done"
     fi
@@ -119,13 +132,13 @@ start_server() {
 
     IP=$(get_ip)
     echo "Server Started!"
-    echo "IP: $IP:$PORT"
+    echo "Join Address: $IP:$PORT"
     read -p "Press Enter..."
 }
 
 stop_server() {
     clear
-    echo "=== Stop Server ==="
+    echo "====== STOP SERVER ======"
     screen -list
     read -p "Enter Server Name to Stop: " NAME
 
@@ -135,12 +148,12 @@ stop_server() {
         return
     fi
 
-    echo "Sending graceful stop command..."
+    echo "Sending safe stop command..."
     screen -S "$NAME" -p 0 -X stuff "stop$(printf '\r')"
     sleep 5
 
     if screen -list | grep -q "\.$NAME"; then
-        echo "Force stopping server..."
+        echo "Force stopping..."
         screen -S "$NAME" -X quit
     fi
 
@@ -148,9 +161,28 @@ stop_server() {
     sleep 2
 }
 
+show_console() {
+    clear
+    echo "====== LIVE SERVER CONSOLE ======"
+    screen -list
+    read -p "Enter Server Name to attach: " NAME
+
+    if ! screen -list | grep -q "\.$NAME"; then
+        echo "Server is not running!"
+        sleep 2
+        return
+    fi
+
+    echo "Attaching to console..."
+    echo "To exit WITHOUT stopping server:"
+    echo "Press CTRL + A then D"
+    sleep 3
+    screen -r "$NAME"
+}
+
 delete_server() {
     clear
-    echo "=== Delete Server ==="
+    echo "====== DELETE SERVER ======"
     ls "$BASE"
     read -p "Enter Server Name: " NAME
     rm -rf "$BASE/$NAME"
@@ -160,7 +192,7 @@ delete_server() {
 
 list_servers() {
     clear
-    echo "=== Server List ==="
+    echo "====== SERVER STATUS LIST ======"
     IP=$(get_ip)
     for s in $(ls "$BASE"); do
         if [ -d "$BASE/$s" ]; then
@@ -169,30 +201,33 @@ list_servers() {
             echo "$s | $STATUS | $IP:$PORT"
         fi
     done
-    read -p "Press Enter..."
+    echo ""
+    read -p "Press Enter to continue..."
 }
 
 install_deps
 
 while true; do
     clear
-    echo "====== SUPER SERVER MENU ======"
+    echo "========== SUPER SERVER =========="
     echo "1. Create Server"
-    echo "2. Start Server"
+    echo "2. Start Server (Background)"
     echo "3. Stop Server"
-    echo "4. Delete Server"
-    echo "5. List Servers (Status)"
-    echo "6. Exit"
-    echo "================================"
+    echo "4. Show Live Console"
+    echo "5. Delete Server"
+    echo "6. List Servers (Status)"
+    echo "7. Exit"
+    echo "=================================="
     read -p "Select Option: " opt
 
     case $opt in
         1) create_server ;;
         2) start_server ;;
         3) stop_server ;;
-        4) delete_server ;;
-        5) list_servers ;;
-        6) exit ;;
+        4) show_console ;;
+        5) delete_server ;;
+        6) list_servers ;;
+        7) exit ;;
         *) echo "Invalid Option"; sleep 1 ;;
     esac
 done
