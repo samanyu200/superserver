@@ -1,173 +1,170 @@
 #!/bin/bash
 
-BASE_DIR="$HOME/mcservers"
+BASE_DIR="/root/mcservers"
+USER_NAME="samanyu200"
+REPO_NAME="superserver"
+
 mkdir -p "$BASE_DIR"
 
-# ===== PUBLIC IP DETECT =====
-PUBLIC_IP=$(curl -s ifconfig.me)
-if [[ -z "$PUBLIC_IP" ]]; then
-  PUBLIC_IP=$(hostname -I | awk '{print $1}')
-fi
+get_public_ip() {
+    curl -s ifconfig.me || curl -s api.ipify.org || echo "0.0.0.0"
+}
 
-# ===== AUTO PORT FINDER =====
 get_free_port() {
-  PORT=25565
-  while lsof -i:$PORT >/dev/null 2>&1; do
-    PORT=$((PORT+1))
-  done
-  echo $PORT
+    for port in 25565 25566 25567 25568 25569; do
+        if ! lsof -i:$port >/dev/null 2>&1; then
+            echo $port
+            return
+        fi
+    done
+    echo "25570"
 }
 
-# ===== SERVER CREATOR =====
+server_exists() {
+    [ -d "$BASE_DIR/$1" ]
+}
+
+is_running() {
+    screen -list | grep -q "mc_$1"
+}
+
 create_server() {
-  read -p "Server name: " NAME
-  read -p "Type (paper/bedrock): " TYPE
-  read -p "RAM (ex: 4G): " RAM
-  read -p "CPU cores (ex: 2): " CPU
+    read -p "Server name: " NAME
+    if server_exists "$NAME"; then
+        echo "Server already exists."
+        return
+    fi
 
-  PORT=$(get_free_port)
+    mkdir -p "$BASE_DIR/$NAME"
+    cd "$BASE_DIR/$NAME"
 
-  SERVER_DIR="$BASE_DIR/$NAME"
-  mkdir -p "$SERVER_DIR"
-  cd "$SERVER_DIR"
+    echo "Select type:"
+    echo "1) Paper (Java)"
+    echo "2) Bedrock"
+    read -p "Choice: " TYPE
 
-  echo "$PORT" > port.txt
-  echo "$TYPE" > type.txt
-  echo "$RAM" > ram.txt
-  echo "$CPU" > cpu.txt
+    PORT=$(get_free_port)
 
-  if [[ "$TYPE" == "paper" ]]; then
-    echo "Downloading latest Paper..."
-    curl -L -o server.jar https://api.papermc.io/v2/projects/paper/versions/1.20.4/builds/416/downloads/paper-1.20.4-416.jar
-    echo "eula=true" > eula.txt
-  fi
-
-  if [[ "$TYPE" == "bedrock" ]]; then
-    echo "Download Bedrock manually and place in this folder."
-  fi
-
-  echo "Server created!"
-  echo "Connect with: $PUBLIC_IP:$PORT"
+    if [ "$TYPE" = "2" ]; then
+        echo "Downloading Bedrock..."
+        wget -q https://minecraft.azureedge.net/bin-linux/bedrock-server-1.21.0.03.zip -O bedrock.zip
+        unzip -q bedrock.zip
+        rm bedrock.zip
+        echo "bedrock" > type.txt
+        echo "$PORT" > port.txt
+        echo "Created Bedrock server on port $PORT"
+    else
+        echo "Downloading Paper..."
+        wget -q https://api.papermc.io/v2/projects/paper/versions/1.20.4/builds/416/downloads/paper-1.20.4-416.jar -O server.jar
+        echo "eula=true" > eula.txt
+        echo "java" > type.txt
+        echo "$PORT" > port.txt
+        echo "Created Paper server on port $PORT"
+    fi
 }
 
-# ===== START SERVER =====
 start_server() {
-  read -p "Server name: " NAME
-  SERVER_DIR="$BASE_DIR/$NAME"
-
-  if [[ ! -d "$SERVER_DIR" ]]; then
-    echo "Server not found."
-    return
-  fi
-
-  cd "$SERVER_DIR"
-
-  TYPE=$(cat type.txt)
-  RAM=$(cat ram.txt)
-  CPU=$(cat cpu.txt)
-  PORT=$(cat port.txt)
-
-  if [[ "$TYPE" == "paper" ]]; then
-
-    if [[ ! -f server.jar ]]; then
-      echo "server.jar missing!"
-      return
+    read -p "Server name: " NAME
+    if ! server_exists "$NAME"; then
+        echo "Server not found."
+        return
     fi
 
-    if ! jar tf server.jar >/dev/null 2>&1; then
-      echo "server.jar is invalid!"
-      return
+    if is_running "$NAME"; then
+        echo "Server already running!"
+        return
     fi
 
-    echo "Starting Paper server..."
-    taskset -c 0-$((CPU-1)) bash -c "
-      while true; do
-        java -Xms$RAM -Xmx$RAM -jar server.jar --nogui
-        echo 'Crash detected. Restarting in 5 seconds...'
-        sleep 5
-      done
-    " &
-    echo $! > pid.txt
-  fi
+    cd "$BASE_DIR/$NAME"
 
-  if [[ "$TYPE" == "bedrock" ]]; then
-    chmod +x bedrock_server
-    ./bedrock_server &
-    echo $! > pid.txt
-  fi
+    rm -f world/session.lock 2>/dev/null
 
-  echo "Server running at $PUBLIC_IP:$PORT"
+    TYPE=$(cat type.txt)
+    PORT=$(cat port.txt)
+    IP=$(get_public_ip)
+
+    echo "Starting server on $IP:$PORT"
+
+    if [ "$TYPE" = "bedrock" ]; then
+        screen -dmS "mc_$NAME" bash -c "./bedrock_server"
+    else
+        screen -dmS "mc_$NAME" bash -c '
+        while true; do
+            java -Xmx4G -Xms2G -jar server.jar --nogui
+            echo "Crash detected. Restarting in 10 seconds..."
+            sleep 10
+        done'
+    fi
 }
 
-# ===== STOP SERVER =====
 stop_server() {
-  read -p "Server name: " NAME
-  SERVER_DIR="$BASE_DIR/$NAME"
-
-  if [[ -f "$SERVER_DIR/pid.txt" ]]; then
-    PID=$(cat "$SERVER_DIR/pid.txt")
-    kill $PID
-    rm "$SERVER_DIR/pid.txt"
-    echo "Server stopped."
-  else
-    echo "Server not running."
-  fi
-}
-
-# ===== SHOW CONSOLE =====
-show_console() {
-  read -p "Server name: " NAME
-  SERVER_DIR="$BASE_DIR/$NAME"
-  cd "$SERVER_DIR"
-
-  TYPE=$(cat type.txt)
-  RAM=$(cat ram.txt)
-
-  if [[ "$TYPE" == "paper" ]]; then
-    java -Xms$RAM -Xmx$RAM -jar server.jar --nogui
-  fi
-
-  if [[ "$TYPE" == "bedrock" ]]; then
-    ./bedrock_server
-  fi
-}
-
-# ===== LIST SERVERS =====
-list_servers() {
-  echo "===== SERVER LIST ====="
-  for DIR in "$BASE_DIR"/*; do
-    if [[ -d "$DIR" ]]; then
-      NAME=$(basename "$DIR")
-      PORT=$(cat "$DIR/port.txt")
-      if [[ -f "$DIR/pid.txt" ]]; then
-        STATUS="RUNNING"
-      else
-        STATUS="OFFLINE"
-      fi
-      echo "$NAME - $STATUS - $PUBLIC_IP:$PORT"
+    read -p "Server name: " NAME
+    if ! is_running "$NAME"; then
+        echo "Server is not running."
+        return
     fi
-  done
+
+    screen -S "mc_$NAME" -X stuff "stop$(printf \\r)"
+    sleep 5
+    screen -S "mc_$NAME" -X quit
+    echo "Server stopped safely."
 }
 
-# ===== MENU =====
-while true; do
-  echo ""
-  echo "====== SUPER SERVER ======"
-  echo "1) Create Server"
-  echo "2) Start Server"
-  echo "3) Stop Server"
-  echo "4) Show Console"
-  echo "5) List Servers"
-  echo "6) Exit"
-  read -p "Choose: " OPTION
+show_console() {
+    read -p "Server name: " NAME
+    if ! is_running "$NAME"; then
+        echo "Server is offline."
+        return
+    fi
+    echo "Attaching to console (CTRL+A then D to detach)"
+    screen -r "mc_$NAME"
+}
 
-  case $OPTION in
-    1) create_server ;;
-    2) start_server ;;
-    3) stop_server ;;
-    4) show_console ;;
-    5) list_servers ;;
-    6) exit ;;
-    *) echo "Invalid option" ;;
-  esac
+list_servers() {
+    echo "==== Server List ===="
+    for dir in "$BASE_DIR"/*; do
+        [ -d "$dir" ] || continue
+        NAME=$(basename "$dir")
+        PORT=$(cat "$dir/port.txt" 2>/dev/null)
+        if is_running "$NAME"; then
+            STATUS="RUNNING"
+        else
+            STATUS="OFFLINE"
+        fi
+        echo "$NAME | Port: $PORT | Status: $STATUS"
+    done
+}
+
+delete_server() {
+    read -p "Server name: " NAME
+    if is_running "$NAME"; then
+        echo "Stop the server first!"
+        return
+    fi
+    rm -rf "$BASE_DIR/$NAME"
+    echo "Server deleted."
+}
+
+while true; do
+    echo ""
+    echo "==== SUPER SERVER MENU ===="
+    echo "1) Create Server"
+    echo "2) Start Server (Background)"
+    echo "3) Stop Server"
+    echo "4) Show Console (Live)"
+    echo "5) List Servers (Status)"
+    echo "6) Delete Server"
+    echo "7) Exit"
+    read -p "Select option: " CHOICE
+
+    case $CHOICE in
+        1) create_server ;;
+        2) start_server ;;
+        3) stop_server ;;
+        4) show_console ;;
+        5) list_servers ;;
+        6) delete_server ;;
+        7) exit 0 ;;
+        *) echo "Invalid option" ;;
+    esac
 done
